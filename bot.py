@@ -10,6 +10,7 @@ Estrategia Pasiva:
 
 from datetime import datetime
 from functools import wraps
+import io
 import json
 import logging
 import math
@@ -22,6 +23,9 @@ import time
 from typing import Any, Callable, Dict, List, Tuple
 import urllib.request
 
+import matplotlib
+matplotlib.use("Agg")  # Backend no interactivo sin entorno gráfico para Docker
+import matplotlib.pyplot as plt
 import telebot
 from telebot import types
 import yfinance as yf
@@ -301,6 +305,141 @@ def formato_moneda(monto: float) -> str:
     return f"${monto:,.2f} MXN"
 
 
+def generar_grafica_rendimiento(
+    titulos_ivv: int,
+    saldo_cetes: float,
+    precio_ivv: float,
+    capital_aportado: float,
+) -> io.BytesIO:
+    """
+    Genera en memoria una infografía financiera con 2 paneles:
+    1. Donut Chart de la composición del portafolio (RV vs RF con porcentajes).
+    2. Bar Chart de Capital Inyectado vs Valor de Mercado con plusvalía/minusvalía.
+    """
+    valor_ivv = titulos_ivv * precio_ivv
+    patrimonio_total = valor_ivv + saldo_cetes
+
+    # Configuración de estilo visual moderno
+    plt.style.use("seaborn-v0_8-whitegrid" if "seaborn-v0_8-whitegrid" in plt.style.available else "default")
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11, 4.6), dpi=150)
+    fig.patch.set_facecolor("#ffffff")
+
+    # 1. Gráfico de Dona: Asignación Real
+    labels = ["IVVPESO.MX (RV)", "CETES / Bonddia (RF)"]
+    colores = ["#1f77b4", "#2ca02c"]
+
+    if patrimonio_total <= 0:
+        valores_grafica = [0.70, 0.30]
+        text_center = "Sin fondos\n$0.00 MXN"
+    else:
+        valores_grafica = [valor_ivv, saldo_cetes]
+        text_center = f"Patrimonio\n${patrimonio_total:,.2f} MXN"
+
+    wedges, texts, autotexts = ax1.pie(
+        valores_grafica,
+        labels=labels,
+        autopct="%1.1f%%",
+        startangle=90,
+        colors=colores,
+        pctdistance=0.75,
+        wedgeprops=dict(width=0.45, edgecolor="white", linewidth=2),
+    )
+    for at in autotexts:
+        at.set_color("white")
+        at.set_fontsize(9.5)
+        at.set_weight("bold")
+    for t in texts:
+        t.set_fontsize(8.5)
+        t.set_weight("bold")
+
+    ax1.set_title("Composición de Activos\n(Meta: 70% RV / 30% RF)", fontsize=11, weight="bold", pad=10)
+    ax1.text(0, 0, text_center, ha="center", va="center", fontsize=8.5, weight="bold", color="#333333")
+
+    # 2. Gráfico de Barras: Capital Inyectado vs Valor de Mercado
+    categorias = ["Capital Aportado", "Valor de Mercado"]
+    montos = [capital_aportado, patrimonio_total]
+    color_rendimiento = "#2ca02c" if patrimonio_total >= capital_aportado else "#d32f2f"
+    bar_colors = ["#607d8b", color_rendimiento]
+
+    bars = ax2.bar(categorias, montos, color=bar_colors, width=0.50, zorder=3)
+    ax2.grid(axis="y", linestyle="--", alpha=0.5, zorder=0)
+    ax2.set_title("Evolución: Inversión vs Valor Actual", fontsize=11, weight="bold", pad=10)
+
+    for bar in bars:
+        h = bar.get_height()
+        ax2.annotate(
+            f"${h:,.2f}",
+            xy=(bar.get_x() + bar.get_width() / 2, h),
+            xytext=(0, 4),
+            textcoords="offset points",
+            ha="center",
+            va="bottom",
+            fontsize=9.5,
+            weight="bold",
+        )
+
+    if max(montos) > 0:
+        ax2.set_ylim(0, max(montos) * 1.25)
+
+    diff = patrimonio_total - capital_aportado
+    pct_rend = (diff / capital_aportado * 100) if capital_aportado > 0 else 0.0
+    signo = "+" if diff >= 0 else ""
+    ax2.set_xlabel(
+        f"Plusvalía / Ganancia: {signo}${diff:,.2f} MXN ({signo}{pct_rend:.2f}%)",
+        fontsize=9.5,
+        weight="bold",
+        color=color_rendimiento,
+        labelpad=8,
+    )
+
+    plt.tight_layout()
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def obtener_resumen_rendimiento() -> Tuple[str, io.BytesIO]:
+    """Genera el texto cuantitativo y la infografía gráfica del estado de rendimiento."""
+    portafolio = cargar_portafolio()
+    historial = cargar_historial()
+    precio_ivv, es_fallback = obtener_precio_ivv()
+
+    titulos_ivv = portafolio["titulos_ivv"]
+    saldo_cetes = portafolio["saldo_cetes"]
+    valor_ivv = titulos_ivv * precio_ivv
+    patrimonio_total = valor_ivv + saldo_cetes
+
+    capital_aportado = sum(h.get("total_aportado", 0.0) for h in historial)
+    # Si no hay historial registrado pero ya existen fondos, tomar el patrimonio base
+    if capital_aportado <= 0 and patrimonio_total > 0:
+        capital_aportado = patrimonio_total
+
+    diff = patrimonio_total - capital_aportado
+    pct_rend = (diff / capital_aportado * 100) if capital_aportado > 0 else 0.0
+    signo = "+" if diff >= 0 else ""
+    icono_rend = "📈" if diff >= 0 else "📉"
+    fuente_precio = "⚠️ Precio estimado (fallback)" if es_fallback else "🟢 Mercado en vivo"
+
+    pct_ivv = (valor_ivv / patrimonio_total * 100) if patrimonio_total > 0 else 0.0
+    pct_cetes = (saldo_cetes / patrimonio_total * 100) if patrimonio_total > 0 else 0.0
+
+    texto = (
+        "📊 *Resumen Mensual de Rendimiento y Patrimonio*\n\n"
+        f"💰 *Patrimonio Actual:* `{formato_moneda(patrimonio_total)}`\n"
+        f"💵 *Capital Inyectado:* `{formato_moneda(capital_aportado)}`\n"
+        f"{icono_rend} *Plusvalía / Retorno:* *{signo}{formato_moneda(diff)}* ({signo}{pct_rend:.2f}%)\n\n"
+        "🏛 *Distribución Real:*\n"
+        f"• *IVVPESO.MX (RV):* `{formato_moneda(valor_ivv)}` (*{pct_ivv:.1f}%* / Meta 70%)\n"
+        f"• *CETES / Bonddia (RF):* `{formato_moneda(saldo_cetes)}` (*{pct_cetes:.1f}%* / Meta 30%)\n\n"
+        f"🏷 *Cotización de referencia:* `{formato_moneda(precio_ivv)}` ({fuente_precio})"
+    )
+
+    grafica = generar_grafica_rendimiento(titulos_ivv, saldo_cetes, precio_ivv, capital_aportado)
+    return texto, grafica
+
+
 def enviar_archivos_backup(chat_id: int, motivo: str = "Respaldo manual") -> None:
     """Envía los archivos JSON como documentos adjuntos de Telegram."""
     asegurar_directorio_datos()
@@ -343,6 +482,7 @@ def comando_ayuda(message: types.Message) -> None:
         "• *30% Renta Fija:* CETES / Bonddia (Cetesdirecto)\n\n"
         "📌 *Operaciones y Análisis:*\n"
         "📊 `/portafolio` - Consulta el estado actual y porcentajes de tu patrimonio.\n"
+        "📈 `/rendimiento` - Genera una infografía visual con gráficas y plusvalía.\n"
         "💵 `/aportar <monto>` - Calcula compras óptimas sin vender nada.\n"
         "✅ `/confirmar_compra <titulos> <cetes>` - Registra compras en portafolio e historial.\n"
         "🔄 `/actualizar <titulos> <saldo>` - Sobrescribe saldos manualmente ante ajustes.\n\n"
@@ -387,6 +527,19 @@ def comando_portafolio(message: types.Message) -> None:
         f"⏰ *Recordatorio mensual:* Día {dia_rec} de cada mes"
     )
     bot.reply_to(message, texto)
+
+
+@bot.message_handler(commands=["rendimiento", "grafica"])
+@solo_autorizado
+def comando_rendimiento(message: types.Message) -> None:
+    """Envía la infografía gráfica del portafolio y reporte de rendimiento."""
+    try:
+        bot.send_chat_action(message.chat.id, "upload_photo")
+        texto_resumen, foto_buffer = obtener_resumen_rendimiento()
+        bot.send_photo(message.chat.id, foto_buffer, caption=texto_resumen)
+    except Exception as e:
+        logger.error(f"Error al generar gráfica de rendimiento: {e}")
+        bot.reply_to(message, f"❌ No se pudo generar la gráfica de rendimiento: {e}")
 
 
 @bot.message_handler(commands=["actualizar"])
@@ -662,16 +815,21 @@ def bucle_planificador_mensual() -> None:
 
             # Si hoy es el día configurado y aún no se ha disparado este mes
             if ahora.day == dia_configurado and ultimo_mes_procesado != mes_actual:
-                logger.info(f"Disparando recordatorio mensual y backup automático del día {ahora.day}...")
-                
-                # 1. Enviar alerta de aportación
-                bot.send_message(
-                    MI_CHAT_ID,
-                    f"🔔 *¡Recordatorio de Inversión Mensual! (Día {ahora.day})*\n\n"
-                    "Llegó tu fecha programada de aportación de capital.\n"
-                    "Ejecuta `/aportar <monto>` para calcular la distribución óptima entre `IVVPESO.MX` y `CETES`.\n\n"
-                    "📦 *Adjunto encontrarás tu respaldo automático mensual de seguridad.*"
-                )
+                logger.info(f"Disparando recordatorio mensual, gráfica y backup del día {ahora.day}...")
+
+                # 1. Enviar alerta de aportación y gráfica de rendimiento
+                try:
+                    texto_resumen, foto_buffer = obtener_resumen_rendimiento()
+                    mensaje_alerta = (
+                        f"🔔 *¡Recordatorio y Balance de Inversión Mensual! (Día {ahora.day})*\n\n"
+                        "Llegó tu fecha programada de aportación de capital.\n"
+                        "Ejecuta `/aportar <monto>` para calcular la distribución óptima entre `IVVPESO.MX` y `CETES`.\n\n"
+                        "📊 *A continuación, tu balance de rendimiento actual:*"
+                    )
+                    bot.send_message(MI_CHAT_ID, mensaje_alerta)
+                    bot.send_photo(MI_CHAT_ID, foto_buffer, caption=texto_resumen)
+                except Exception as e_graf:
+                    logger.error(f"Error al enviar resumen visual en recordatorio: {e_graf}")
 
                 # 2. Enviar archivos adjuntos de respaldo
                 enviar_archivos_backup(MI_CHAT_ID, motivo="Copia de seguridad mensual automática")
@@ -679,10 +837,13 @@ def bucle_planificador_mensual() -> None:
                 # 3. Marcar mes como procesado para no repetir
                 portafolio["ultimo_recordatorio_mes"] = mes_actual
                 guardar_portafolio(portafolio)
-                logger.info("Recordatorio y backup mensual completados con éxito.")
+                logger.info("Recordatorio, gráfica y backup mensual completados con éxito.")
 
         except Exception as e:
             logger.error(f"Excepción en bucle planificador: {e}")
+
+        # Enviar ping a Healthchecks.io / Uptime Kuma si está configurado
+        enviar_ping_heartbeat()
 
         # Revisar cada 15 minutos (900 segundos)
         time.sleep(900)

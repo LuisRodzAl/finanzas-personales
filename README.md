@@ -46,6 +46,7 @@ finanzas-personales/
 | :--- | :--- | :--- |
 | `/start` o `/ayuda` | Despliega el menú de comandos y explicación de la estrategia. | `/ayuda` |
 | `/portafolio` | Muestra títulos actuales, cotización en tiempo real vía Yahoo Finance, saldo en CETES y balance real vs meta. | `/portafolio` |
+| `/rendimiento` | Genera una infografía gráfica con desglose de activos y cálculo de plusvalía/retorno. | `/rendimiento` |
 | `/aportar <monto>` | Calcula la compra óptima de títulos enteros y el envío a CETES para acercarte al 70/30 sin vender nada. | `/aportar 7500` |
 | `/confirmar_compra <titulos> <cetes>` | Suma los títulos comprados y el dinero a `portafolio.json` y los registra en `historial.json`. | `/confirmar_compra 48 2450.50` |
 | `/actualizar <titulos> <saldo>` | Sobrescribe manualmente los valores del portafolio en caso de discrepancias con estados de cuenta. | `/actualizar 150 14200.00` |
@@ -59,12 +60,13 @@ finanzas-personales/
 
 ---
 
-## ⏰ Recordatorio y Respaldo Automático Mensual
+## ⏰ Recordatorio, Infografía y Respaldo Automático Mensual
 
 El bot cuenta con un **hilo planificador en segundo plano (Scheduler)**:
 1. Por defecto viene programado para el día **15** de cada mes (puedes cambiarlo en cualquier momento con `/recordatorio <dia>`).
 2. En la fecha elegida, el bot:
    - Te envía una notificación a Telegram recordando tu aportación mensual.
+   - **Genera y adjunta automáticamente una infografía gráfica** con el estado de tu dinero, porcentajes y plusvalía generada.
    - Adjunta automáticamente una copia de seguridad fresca de tus archivos de datos (`portafolio.json` e `historial.json`).
 3. Registra el mes en curso para garantizar que **solo se ejecute una vez por mes**.
 

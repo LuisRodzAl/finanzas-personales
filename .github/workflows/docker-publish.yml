@@ -1,7 +1,10 @@
-name: Build and Push Docker Image
+name: CI/CD Pipeline
 
 on:
   push:
+    branches:
+      - main
+  pull_request:
     branches:
       - main
 
@@ -10,7 +13,31 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  test-and-build:
+  # 1. Este trabajo corre SIEMPRE (en commits a main y en cada Pull Request de Dependabot)
+  # Si este check está en VERDE, el PR es seguro de mergear.
+  test:
+    name: Validar Dependencias y Sintaxis (Quality Gate)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependencias y comprobar compatibilidad
+        run: |
+          pip install -r requirements.txt
+          python -m py_compile bot.py
+          python -c "import telebot, yfinance; print('Validación de dependencias e importación exitosa.')"
+
+  # 2. Este trabajo SOLO corre cuando se hace merge/push a main y tras pasar las pruebas
+  build-and-push:
+    name: Compilar y Publicar Contenedor Docker
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,17 +46,6 @@ jobs:
     steps:
       - name: Checkout del repositorio
         uses: actions/checkout@v4
-
-      - name: Configurar Python para validación previa (Quality Gate)
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      - name: Instalar dependencias y validar sintaxis
-        run: |
-          pip install -r requirements.txt
-          python -m py_compile bot.py
-          python -c "import telebot, yfinance; print('Dependencias e importaciones validadas correctamente.')"
 
       - name: Iniciar sesión en GitHub Container Registry (GHCR)
         uses: docker/login-action@v3
@@ -51,7 +67,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Compilar y publicar imagen Docker
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true

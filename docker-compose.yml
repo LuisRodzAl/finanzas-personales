@@ -1,0 +1,27 @@
+services:
+  bot-inversiones:
+    build: .
+    # Para actualización automática con Watchtower, define aquí la imagen generada por GitHub Actions (siempre en minúsculas):
+    image: ghcr.io/luisrodzal/finanzas-personales:latest
+    container_name: bot-inversiones-telegram
+    restart: unless-stopped
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  # Servicio de auto-actualización continua (Watchtower)
+  # Detecta imágenes nuevas publicadas en GitHub Container Registry y actualiza el bot en caliente sin downtime perceptible
+  watchtower:
+    image: containrrr/watchtower
+    container_name: watchtower-bot-updater
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_POLL_INTERVAL=60 # Comprueba actualizaciones cada 60 segundos
+      - WATCHTOWER_INCLUDE_STOPPED=false
+      - WATCHTOWER_REVIVE_STOPPED=false

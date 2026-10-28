@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # Actualizaciones automáticas de dependencias de Python (pip)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly" # Revisa nuevas versiones cada semana
+    open-pull-requests-limit: 5
+
+  # Actualizaciones automáticas de los workflows de GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+

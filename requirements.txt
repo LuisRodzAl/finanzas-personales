@@ -1,0 +1,6 @@
+# pyTelegramBotAPI: Protegido contra breaking changes de versión mayor (v5+)
+pyTelegramBotAPI>=4.14.0,<5.0.0
+
+# yfinance: Permite actualizaciones continuas de parches y versiones menores
+# para adaptarse a los cambios frecuentes de endpoints en Yahoo Finance
+yfinance>=0.2.36

@@ -17,6 +17,7 @@ services:
   watchtower:
     # nickfedor/watchtower es el fork activamente mantenido compatible con Docker moderno (v26/v27+)
     image: nickfedor/watchtower
+    command: bot-inversiones-telegram
     container_name: watchtower-bot-updater
     restart: unless-stopped
     volumes:

@@ -24,11 +24,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-          cache: 'pip'
 
       - name: Instalar dependencias y validar sintaxis
         run: |
-          pip install --no-cache-dir -r requirements.txt
+          pip install -r requirements.txt
           python -m py_compile bot.py
           python -c "import telebot, yfinance; print('Dependencias e importaciones validadas correctamente.')"
 

@@ -15,10 +15,12 @@ import logging
 import math
 import os
 from pathlib import Path
+import signal
 import sys
 import threading
 import time
 from typing import Any, Callable, Dict, List, Tuple
+import urllib.request
 
 import telebot
 from telebot import types
@@ -39,6 +41,7 @@ logger = logging.getLogger("bot-inversiones")
 # =====================================================================
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 MI_CHAT_ID_RAW = os.getenv("MI_CHAT_ID")
+HEALTHCHECK_URL = os.getenv("HEALTHCHECK_URL", "").strip()
 
 if not TELEGRAM_TOKEN:
     logger.critical("Error fatal: La variable de entorno TELEGRAM_TOKEN no está configurada.")
@@ -685,6 +688,40 @@ def bucle_planificador_mensual() -> None:
         time.sleep(900)
 
 
+def enviar_ping_heartbeat() -> None:
+    """Envía un ping silencioso a Healthchecks.io o Uptime Kuma (Dead Man's Switch)."""
+    if not HEALTHCHECK_URL:
+        return
+    try:
+        urllib.request.urlopen(HEALTHCHECK_URL, timeout=10)
+        logger.debug("Heartbeat ping enviado con éxito.")
+    except Exception as e:
+        logger.warning(f"No se pudo enviar ping al heartbeat: {e}")
+
+
+def manejador_apagado(signum: int, frame: Any) -> None:
+    """
+    Notifica a Telegram antes de que Docker o Watchtower apaguen el contenedor
+    (por reinicio manual o actualización de imagen).
+    """
+    logger.info(f"Señal de apagado controlada recibida ({signum}). Notificando a Telegram...")
+    try:
+        bot.send_message(
+            MI_CHAT_ID,
+            "🔄 *Actualización del Sistema en Curso*\n\n"
+            "El bot se está deteniendo de forma controlada para aplicar una actualización.\n"
+            "⏳ Volverá a estar en línea en unos segundos..."
+        )
+    except Exception as e:
+        logger.error(f"No se pudo enviar notificación de apagado a Telegram: {e}")
+    finally:
+        try:
+            bot.stop_polling()
+        except Exception:
+            pass
+        sys.exit(0)
+
+
 # =====================================================================
 # INICIALIZACIÓN Y BUCLE CONTINUO
 # =====================================================================
@@ -694,6 +731,13 @@ def iniciar_bot() -> None:
     asegurar_directorio_datos()
     cargar_portafolio()
     cargar_historial()
+
+    # Registrar señales de apagado elegante (Docker SIGTERM / SIGINT)
+    try:
+        signal.signal(signal.SIGTERM, manejador_apagado)
+        signal.signal(signal.SIGINT, manejador_apagado)
+    except (ValueError, AttributeError):
+        pass  # En entornos sin soporte completo de señales (algunos hilos de Windows)
 
     # Iniciar hilo en segundo plano para recordatorios y backups automáticos
     hilo_scheduler = threading.Thread(target=bucle_planificador_mensual, daemon=True)
@@ -721,6 +765,14 @@ def iniciar_bot() -> None:
         bot.infinity_polling(timeout=20, long_polling_timeout=20)
     except Exception as e:
         logger.critical(f"Falla inesperada en infinity_polling: {e}", exc_info=True)
+        try:
+            bot.send_message(
+                MI_CHAT_ID,
+                f"🚨 *Alerta Crítica del Sistema*\n\n"
+                f"El bot ha sufrido una caída inesperada:\n`{str(e)[:300]}`"
+            )
+        except Exception:
+            pass
         sys.exit(1)
 
 

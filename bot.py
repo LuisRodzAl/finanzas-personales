@@ -475,14 +475,19 @@ def enviar_archivos_backup(chat_id: int, motivo: str = "Respaldo manual") -> Non
 @solo_autorizado
 def comando_ayuda(message: types.Message) -> None:
     """Muestra el menú de bienvenida, explicación de la estrategia y comandos disponibles."""
+    portafolio = cargar_portafolio()
+    meta_rv = portafolio.get("peso_ivv", PESO_OBJETIVO_IVV) * 100
+    meta_rf = portafolio.get("peso_cetes", PESO_OBJETIVO_CETES) * 100
+
     texto = (
         "🏛 *Asesor Financiero y Rebalanceo Pasivo*\n"
-        "Estrategia de Asignación Fija para México:\n"
-        "• *70% Renta Variable:* ETF `IVVPESO.MX` (S&P 500 cubierto en pesos)\n"
-        "• *30% Renta Fija:* CETES / Bonddia (Cetesdirecto)\n\n"
+        f"Estrategia de Asignación Personalizada para México:\n"
+        f"• *{meta_rv:.0f}% Renta Variable:* ETF `IVVPESO.MX` (S&P 500 cubierto en pesos)\n"
+        f"• *{meta_rf:.0f}% Renta Fija:* CETES / Bonddia (Cetesdirecto)\n\n"
         "📌 *Operaciones y Análisis:*\n"
         "📊 `/portafolio` - Consulta el estado actual y porcentajes de tu patrimonio.\n"
         "📈 `/rendimiento` - Genera una infografía visual con gráficas y plusvalía.\n"
+        "🎯 `/estrategia [rv] [rf]` - Consulta o ajusta tus metas de inversión (ej. 70 30 o 20 80).\n"
         "💵 `/aportar <monto>` - Calcula compras óptimas sin vender nada.\n"
         "✅ `/confirmar_compra <titulos> <cetes>` - Registra compras en portafolio e historial.\n"
         "🔄 `/actualizar <titulos> <saldo>` - Sobrescribe saldos manualmente ante ajustes.\n\n"
@@ -503,6 +508,9 @@ def comando_portafolio(message: types.Message) -> None:
     titulos_ivv = portafolio["titulos_ivv"]
     saldo_cetes = portafolio["saldo_cetes"]
 
+    peso_meta_ivv = portafolio.get("peso_ivv", PESO_OBJETIVO_IVV) * 100
+    peso_meta_cetes = portafolio.get("peso_cetes", PESO_OBJETIVO_CETES) * 100
+
     precio_ivv, es_fallback = obtener_precio_ivv()
     valor_ivv = titulos_ivv * precio_ivv
     patrimonio_total = valor_ivv + saldo_cetes
@@ -513,16 +521,28 @@ def comando_portafolio(message: types.Message) -> None:
     fuente_precio = "⚠️ Precio estimado (fallback)" if es_fallback else "🟢 Mercado en vivo"
     dia_rec = portafolio.get("dia_recordatorio", DIA_RECORDATORIO_DEFAULT)
 
+    # Cálculo de Precio Medio Ponderado (PMP) desde el historial si hay compras registradas
+    linea_pmp = ""
+    historial = cargar_historial()
+    total_titulos_hist = sum(h.get("titulos_ivv", 0) for h in historial)
+    total_dinero_ivv = sum(h.get("dinero_ivv", 0.0) for h in historial)
+    if total_titulos_hist > 0 and titulos_ivv > 0:
+        pmp = total_dinero_ivv / total_titulos_hist
+        rendimiento_pct = ((precio_ivv - pmp) / pmp) * 100
+        signo = "+" if rendimiento_pct >= 0 else ""
+        linea_pmp = f"• Precio promedio de compra: `{formato_moneda(pmp)}` ({signo}{rendimiento_pct:.2f}%)\n"
+
     texto = (
         "📊 *Estado Actual del Portafolio*\n\n"
         f"📈 *Renta Variable (IVVPESO.MX):*\n"
         f"• Títulos en posesión: `{titulos_ivv}`\n"
         f"• Cotización: `{formato_moneda(precio_ivv)}` ({fuente_precio})\n"
         f"• Valor acumulado: `{formato_moneda(valor_ivv)}`\n"
-        f"• Asignación real: *{pct_ivv:.2f}%* (Meta: 70.00%)\n\n"
+        f"{linea_pmp}"
+        f"• Asignación real: *{pct_ivv:.2f}%* (Meta: {peso_meta_ivv:.0f}%)\n\n"
         f"🛡 *Renta Fija (CETES / Bonddia):*\n"
         f"• Saldo en cuenta: `{formato_moneda(saldo_cetes)}`\n"
-        f"• Asignación real: *{pct_cetes:.2f}%* (Meta: 30.00%)\n\n"
+        f"• Asignación real: *{pct_cetes:.2f}%* (Meta: {peso_meta_cetes:.0f}%)\n\n"
         f"💼 *Patrimonio Neto Total:* `{formato_moneda(patrimonio_total)}`\n"
         f"⏰ *Recordatorio mensual:* Día {dia_rec} de cada mes"
     )
@@ -540,6 +560,80 @@ def comando_rendimiento(message: types.Message) -> None:
     except Exception as e:
         logger.error(f"Error al generar gráfica de rendimiento: {e}")
         bot.reply_to(message, f"❌ No se pudo generar la gráfica de rendimiento: {e}")
+
+
+@bot.message_handler(commands=["estrategia"])
+@solo_autorizado
+def comando_estrategia(message: types.Message) -> None:
+    """
+    Consulta o modifica los porcentajes objetivos de la estrategia de inversión.
+    Uso:
+      /estrategia -> Muestra la estrategia actual y sugerencias
+      /estrategia <porcentaje_rv> <porcentaje_rf> -> Modifica la estrategia (ej. /estrategia 70 30)
+    """
+    portafolio = cargar_portafolio()
+    peso_ivv_actual = portafolio.get("peso_ivv", PESO_OBJETIVO_IVV) * 100
+    peso_cetes_actual = portafolio.get("peso_cetes", PESO_OBJETIVO_CETES) * 100
+
+    partes = message.text.strip().split()
+    if len(partes) == 1:
+        texto = (
+            "🎯 *Estrategia y Metas de Asignación*\n\n"
+            f"• 📈 *Renta Variable (IVVPESO.MX):* `{peso_ivv_actual:.0f}%`\n"
+            f"• 🛡 *Renta Fija (CETES / Bonddia):* `{peso_cetes_actual:.0f}%`\n\n"
+            "💡 *¿Cómo cambiarla?*\n"
+            "`/estrategia <porcentaje_rv> <porcentaje_rf>`\n"
+            "_La suma de ambos debe ser exactamente 100._\n\n"
+            "🌱 *Perfiles sugeridos:*\n"
+            "• `/estrategia 70 30` 🚀 *Crecimiento:* Mayor exposición a bolsa a largo plazo (Actual).\n"
+            "• `/estrategia 50 50` ⚖️ *Equilibrado:* Mitad acciones para crecer, mitad CETES con menor volatilidad.\n"
+            "• `/estrategia 20 80` 🛡 *Conservador / Principiante:* 80% en CETES asegurando rendimiento, 20% en bolsa.\n"
+            "• `/estrategia 0 100` 🏰 *Fondo de Emergencia:* 100% en CETES hasta juntar tu colchón."
+        )
+        bot.reply_to(message, texto)
+        return
+
+    if len(partes) != 3:
+        bot.reply_to(
+            message,
+            "❌ *Sintaxis incorrecta.*\n"
+            "Uso: `/estrategia <porcentaje_rv> <porcentaje_rf>`\n"
+            "Ejemplo para 70% acciones y 30% CETES: `/estrategia 70 30`\n"
+            "Ejemplo para 20% acciones y 80% CETES: `/estrategia 20 80`"
+        )
+        return
+
+    try:
+        rv = float(partes[1])
+        rf = float(partes[2])
+    except ValueError:
+        bot.reply_to(message, "❌ Los porcentajes deben ser números válidos.")
+        return
+
+    if rv < 0 or rf < 0:
+        bot.reply_to(message, "❌ Los porcentajes no pueden ser negativos.")
+        return
+
+    if not math.isclose(rv + rf, 100.0, rel_tol=1e-5, abs_tol=1e-5):
+        bot.reply_to(
+            message,
+            f"❌ La suma de Renta Variable ({rv:.1f}%) y Renta Fija ({rf:.1f}%) debe dar exactamente *100%*.\n"
+            f"Suma recibida: `{rv + rf:.1f}%`."
+        )
+        return
+
+    portafolio["peso_ivv"] = round(rv / 100.0, 4)
+    portafolio["peso_cetes"] = round(rf / 100.0, 4)
+    guardar_portafolio(portafolio)
+
+    texto_confirmacion = (
+        "✅ *Estrategia de inversión actualizada con éxito!*\n\n"
+        f"• 📈 *Renta Variable (IVVPESO.MX):* `{rv:.0f}%`\n"
+        f"• 🛡 *Renta Fija (CETES / Bonddia):* `{rf:.0f}%`\n\n"
+        "A partir de ahora, cada vez que uses `/aportar <monto>`, el cálculo de compras "
+        "se adaptará a esta nueva meta sin vender tus posiciones existentes."
+    )
+    bot.reply_to(message, texto_confirmacion)
 
 
 @bot.message_handler(commands=["actualizar"])

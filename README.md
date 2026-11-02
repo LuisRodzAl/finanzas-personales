@@ -45,9 +45,10 @@ finanzas-personales/
 | Comando | Descripción | Ejemplo de Uso |
 | :--- | :--- | :--- |
 | `/start` o `/ayuda` | Despliega el menú de comandos y explicación de la estrategia. | `/ayuda` |
-| `/portafolio` | Muestra títulos actuales, cotización en tiempo real vía Yahoo Finance, saldo en CETES y balance real vs meta. | `/portafolio` |
+| `/portafolio` | Muestra títulos actuales, cotización en tiempo real vía Yahoo Finance, saldo en CETES, PMP y balance real vs meta. | `/portafolio` |
 | `/rendimiento` | Genera una infografía gráfica con desglose de activos y cálculo de plusvalía/retorno. | `/rendimiento` |
-| `/aportar <monto>` | Calcula la compra óptima de títulos enteros y el envío a CETES para acercarte al 70/30 sin vender nada. | `/aportar 7500` |
+| `/estrategia [rv] [rf]` | Consulta o ajusta los porcentajes de la meta (ej. `70 30` o `20 80`). | `/estrategia 70 30` |
+| `/aportar <monto>` | Calcula la compra óptima de títulos enteros y el envío a CETES para acercarte a la meta sin vender nada. | `/aportar 7500` |
 | `/confirmar_compra <titulos> <cetes>` | Suma los títulos comprados y el dinero a `portafolio.json` y los registra en `historial.json`. | `/confirmar_compra 48 2450.50` |
 | `/actualizar <titulos> <saldo>` | Sobrescribe manualmente los valores del portafolio en caso de discrepancias con estados de cuenta. | `/actualizar 150 14200.00` |
 

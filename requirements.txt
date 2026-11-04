@@ -6,4 +6,4 @@ pyTelegramBotAPI>=4.37.1,<5.0.0
 yfinance>=1.7.0
 
 # Generación de gráficas de rendimiento y composición patrimonial
-matplotlib>=3.8.0
+matplotlib>=3.11.2
